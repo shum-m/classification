@@ -1,18 +1,23 @@
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_curve, auc
 
 NAME_CSV = 'data.csv'
-"""Путь к .csv файлу"""
+"""Путь к .csv файлу."""
 
-LEARNING_PERCENT = 0.1
+LEARNING_PERCENT = 0.8
 """Размер обучающей выборки."""
 
-ITERATIONS = 100
+ITERATIONS = 150
 """Число итераций."""
 
-LEARNING_RATE = 10 ** -5
+LEARNING_RATE = 5 * 10 ** -4
 """Коэффициент обучения."""
+
+LOGISTIC_REGRESSION_THRESHOLD = 0.5
+"""Пороговое значение логистической регрессии."""
 
 COL_INDEX_NUM_CLIENT = 0
 """Индекс столбца номера клиента банка."""
@@ -46,15 +51,15 @@ class MyLogisticRegression:
         return 1 / (1 + np.exp(-a))
 
     @staticmethod
-    def calc_cost(m, out_params, weights):
+    def calc_cost(m, out_params, comb):
         """
         Считает функцию потерь в методе градиентного спуска.
         :param m: Размерность.
         :param out_params: Выходные параметры.
-        :param weights: Веса.
+        :param comb: Комбинация.
         :return: Функция потерь.
         """
-        return -(1 / m) * np.sum(out_params * (np.log(weights)) + (1 - out_params) * (np.log(1 - weights)))
+        return -(1 / m) * np.sum(out_params * (np.log(comb)) + (1 - out_params) * (np.log(1 - comb)))
 
     @staticmethod
     def calc_weights(w, in_params):
@@ -68,16 +73,16 @@ class MyLogisticRegression:
         return weights
 
     @staticmethod
-    def update_weights(m, weights, in_params, out_params):
+    def update_weights(m, comb, in_params, out_params):
         """
         Обновление весов
         :param m: Размерность.
-        :param weights: Веса.
+        :param comb: Комбинация..
         :param in_params: Входные данные.
         :param out_params: Выходные данные.
         :return: Новые веса.
         """
-        dw = (1 / m) * np.dot(in_params, (weights - out_params).T)
+        dw = (1 / m) * np.dot(in_params, (comb - out_params).T)
         return dw
 
     @staticmethod
@@ -87,7 +92,7 @@ class MyLogisticRegression:
         :param w: Веса.
         :param in_params: Входные данные.
         :param out_params: Выходные данные.
-        :param num_iterations: Количество итераци.
+        :param num_iterations: Количество итераций.
         :param learning_rate: Коэффициент обучения.
         :return: Веса, новые веса, функция ошибок.
         """
@@ -97,10 +102,10 @@ class MyLogisticRegression:
         dw = None
 
         for i in range(num_iterations):
-            new_weights = MyLogisticRegression.calc_weights(w, in_params)
-            cost = MyLogisticRegression.calc_cost(m, out_params, new_weights)
+            comb = MyLogisticRegression.calc_weights(w, in_params)
+            cost = MyLogisticRegression.calc_cost(m, out_params, comb)
 
-            dw = MyLogisticRegression.update_weights(m, new_weights, in_params, out_params)
+            dw = MyLogisticRegression.update_weights(m, comb, in_params, out_params)
             w = w - learning_rate * dw
 
             costs.append(cost)
@@ -114,25 +119,25 @@ class MyLogisticRegression:
         :param w: Веса.
         :param in_params: Входные параметры.
         :param out_params: Выходные параметры.
-        :return: Прогноз, точность прогноза.
+        :return: Прогноз, точность прогноза, матрица сопряженности, вероятности.
         """
         m = in_params.shape[1]
-        weights = np.dot(w.T, in_params)
+        comb = np.dot(w.T, in_params)
         new_prediction = np.zeros((1, m))
-
+        proba = []
         accuracy_count = 0
         true_positive = 0
         true_negative = 0
         false_positive = 0
         false_negative = 0
 
-        for i in range(1, m):
-            if weights[0][i] <= 0.5:
+        for i in range(m):
+            proba.append(MyLogisticRegression.sigmoid(comb[0][i]))
+            if proba[i] <= LOGISTIC_REGRESSION_THRESHOLD:
                 new_prediction[0][i] = 0
             else:
                 new_prediction[0][i] = 1
 
-        for i in range(1, m):
             if new_prediction[0][i] == out_params[0][i]:
                 accuracy_count += 1
 
@@ -146,7 +151,11 @@ class MyLogisticRegression:
             elif new_prediction[0][i] != out_params[0][i] and new_prediction[0][i] == 1 and out_params[0][i] == 0:
                 false_positive += 1
 
-        return new_prediction, (accuracy_count / in_params.shape[1]) * 100
+        confusion_matrix = np.array([true_positive, true_negative, false_positive, false_negative]).reshape((2, 2))
+        result_prediction = {'prediction': new_prediction, 'accuracy': (accuracy_count / in_params.shape[1]) * 100,
+                             'confusion': confusion_matrix, 'proba': np.array(proba)}
+
+        return result_prediction
 
     @staticmethod
     def logistic_regression(in_train, out_train, in_test, out_test, learning_rate=LEARNING_RATE,
@@ -159,17 +168,17 @@ class MyLogisticRegression:
         :param out_test: Тестовые выходные данные.
         :param learning_rate: Коэффициент обучения.
         :param num_iterations: Количество итераций.
-        :return: Прогноз для тренировочной выборки, точность этого прогноза,
-        прогноз для тестовой выборки, точность для этого прогноза.
+        :return: Для каждой выборки: прогноз для выборки, точность этого прогноза, матрицу сопряженности
+        (ошибки 1 и 2 рода), вероятности, функция ошибок модели.
         """
         w = np.zeros([in_train.shape[0], 1])
 
         w, dw, costs = MyLogisticRegression.gradient_descent(w, in_train, out_train, num_iterations, learning_rate)
 
-        train_predict, train_accuracy = MyLogisticRegression.prediction(w, in_train, out_train)
-        test_predict, test_accuracy = MyLogisticRegression.prediction(w, in_test, out_test)
+        train_logistic_regression = MyLogisticRegression.prediction(w, in_train, out_train)
+        test_logistic_regression = MyLogisticRegression.prediction(w, in_test, out_test)
 
-        return train_predict, train_accuracy, test_predict, test_accuracy, costs
+        return train_logistic_regression, test_logistic_regression
 
 
 class BankData:
@@ -186,7 +195,6 @@ class BankData:
         """Данные из csv файла."""
 
         self.data.dropna()
-        print(self.data.shape)
 
         self.cols = list(self.data.columns)
         """Столбцы документа."""
@@ -200,20 +208,15 @@ class BankData:
         self.data = self.data.loc[self.data[self.cols[COL_INDEX_BKI_SCORE]] >= 0]
         self.data[self.cols[COL_INDEX_SCORE]] = self.data[self.cols[COL_INDEX_SCORE]].astype(int)
 
-        print(self.data.head)
-
     def get_train_test_samples(self):
         """
         Получает выборки для обучения и тестирования.
         :return: Датафреймы для обучения и тестирования.
         """
-        train_data = self.data.sample(frac=LEARNING_PERCENT).sort_values(by=[self.cols[COL_INDEX_NUM_CLIENT]])
-        print('Обучение:')
-        print(train_data.head)
+        train_data = self.data.sample(frac=LEARNING_PERCENT, random_state=0).sort_values(
+            by=[self.cols[COL_INDEX_NUM_CLIENT]])
 
         test_data = self.data.drop(train_data.index).sort_values(by=[self.cols[COL_INDEX_NUM_CLIENT]])
-        print('Тестирование:')
-        print(test_data.head)
 
         return train_data, test_data
 
@@ -225,15 +228,29 @@ class BankData:
         :return: Датафреймы входных и выходных значений.
         """
         input_data = dataframe[dataframe.columns[COL_INDEX_SCORE]].to_numpy().T
+        input_data = BankData.minimax_normalize(input_data)
+
         output_data = dataframe[dataframe.columns[COL_INDEX_DEBT]].to_numpy().T
 
         return input_data, output_data
 
     @staticmethod
-    def generate_new_data(train_dataframe, result_train, test_dataframe, result_test):
+    def minimax_normalize(not_norm_data):
         """
-        Генерирует новые данные: <file_name>_result.csv - данные с прогнозом;
-        <file_name>_errors.csv - данные об ошибках I и II рода
+        Минимакс нормализация.
+        :param not_norm_data: Ненормализованные данные.
+        :return: Нормализованные данные.
+        """
+        min_vals = np.min(not_norm_data, axis=0)
+        max_vals = np.max(not_norm_data, axis=0)
+
+        return (not_norm_data - min_vals) / (max_vals - min_vals)
+
+    @staticmethod
+    def generate_new_data(file_name, train_dataframe, result_train, test_dataframe, result_test):
+        """
+        Генерирует csv файл.
+        :param file_name: Имя файла.
         :param train_dataframe: Датафрейм тренировочных данных.
         :param result_train: Результаты прогнозирования на тренировочных данных.
         :param test_dataframe: Датафрейм тестовых данных.
@@ -248,9 +265,25 @@ class BankData:
         new_dataframe = new_dataframe.sort_values(by=[new_dataframe.columns[COL_INDEX_NUM_CLIENT]])
         new_dataframe = new_dataframe.drop(columns=new_dataframe.columns[COL_INDEX_NUM_CLIENT])
 
-        new_dataframe.to_csv(NAME_CSV.replace('.csv', '_result.csv'), sep=';', encoding='windows-1251')
+        new_dataframe.to_csv(file_name, sep=';', encoding='windows-1251')
 
-        # TODO: ДОБАВИТЬ ВЫЧИСЛЕНИЕ ОШИБОК ПЕРВОГО И ВТОРОГО РОДА
+
+class ROCCurve:
+    @staticmethod
+    def show_curve(classes, classes_proba):
+        fpr, tpr, thresholds = roc_curve(classes, classes_proba)
+        roc_auc = auc(fpr, tpr)
+
+        plt.figure()
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.0])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curve')
+        plt.legend(loc="lower right")
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -259,9 +292,6 @@ if __name__ == '__main__':
     d.convert_to_analyse()
     data_train, data_test = d.get_train_test_samples()
 
-    # Логистическая регрессия
-
-    # надо ли использовать столбец баллов БКИ при лог. регрессии?
     input_train, output_train = BankData.get_input_output_data(data_train)
     input_test, output_test = BankData.get_input_output_data(data_test)
 
@@ -271,26 +301,39 @@ if __name__ == '__main__':
     print('Тестовые входные и выходные')
     print(input_test, output_test)
 
-    # Логистическая регрессия MyLogisticRegression
+    # region Логистическая регрессия MyLogisticRegression
 
-    train_pr_mlr, train_a_mlr, test_pr_mlr, test_a_mlr, costs_f = \
-        MyLogisticRegression.logistic_regression(
-            input_train.reshape(-1, 1).T,
-            output_train.reshape(-1, 1).T,
-            input_test.reshape(-1, 1).T,
-            output_test.reshape(-1, 1).T)
+    train_mlr, test_mlr = MyLogisticRegression.logistic_regression(
+        input_train.reshape(-1, 1).T,
+        output_train.reshape(-1, 1).T,
+        input_test.reshape(-1, 1).T,
+        output_test.reshape(-1, 1).T)
 
-    print('(MyLogisticRegression) Точность на обучающей выборке ' + str(train_a_mlr) + ' %')
-    print('(MyLogisticRegression) Точность на тестовой выборке ' + str(test_a_mlr) + ' %')
+    print('(MyLogisticRegression) Точность на обучающей выборке ' + str(train_mlr['accuracy']) + ' %')
+    print('(MyLogisticRegression) Точность на тестовой выборке ' + str(test_mlr['accuracy']) + ' %')
+    print('(MyLogisticRegression) Тестовая выборка матрица сопряженности', test_mlr['confusion'])
 
-    # Логистическая регрессия sklearn
+    ROCCurve.show_curve(output_test, test_mlr['proba'])
+
+    # endregion
+
+    # region Логистическая регрессия sklearn
     clf = LogisticRegression(random_state=0, max_iter=ITERATIONS).fit(input_train.reshape(-1, 1), output_train.T)
+
+    train_pred = clf.predict(input_train.reshape(-1, 1))
+    test_pred = clf.predict(input_test.reshape(-1, 1))
     train_a_skl = clf.score(input_train.reshape(-1, 1), output_train.T)
+
     print('(SKLEARN) Точность на обучающей выборке ' + str(train_a_skl * 100) + ' %')
 
-    y_pred = clf.predict(input_test.reshape(-1, 1))
     test_a_skl = clf.score(input_test.reshape(-1, 1), output_test)
     print('(SKLEARN) Точность на тестовой выборке ' + str(test_a_skl * 100) + ' %')
 
-    # Создание новых файлов
-    d.generate_new_data(data_train, train_pr_mlr, data_test, test_pr_mlr)
+    y_score = clf.predict_proba(input_test.reshape(-1, 1))[:, 1]
+    ROCCurve.show_curve(output_test, y_score)
+
+    # endregion
+
+    # Создание нового файла
+    d.generate_new_data('mlr_data.csv', data_train, train_mlr['prediction'], data_test, test_mlr['prediction'])
+    d.generate_new_data('scikit_data.csv', data_train, train_pred, data_test, test_pred)
