@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-
 NAME_CSV = 'data.csv'
 """Путь к .csv файлу."""
 
@@ -167,6 +166,82 @@ class MyLogisticRegression:
         return train_logistic_regression, test_logistic_regression
 
 
+class NaiveBayesClassifier:
+    """
+    Наивный байесовский классификатор.
+    """
+
+    @staticmethod
+    def fit(in_train, out_train):
+        """
+        Находит уникальные классы, среднее значение и дисперсию по входным данным.
+        :param in_train: Входные тренировочные данные.
+        :param out_train: Выходные тренировочные данные.
+        :return: Классы, среднее значение и дисперсия.
+        """
+        in_train = in_train.T
+        out_train = out_train.T.ravel()
+        classes = np.unique(out_train)
+        n_features = in_train.shape[1]
+        mean = np.zeros((len(classes), n_features))
+        var = np.zeros((len(classes), n_features))
+        for i, c in enumerate(classes):
+            x_class = in_train[c == out_train]
+            mean[i, :] = x_class.mean(axis=0)
+            var[i, :] = x_class.var(axis=0)
+        return classes, mean, var
+
+    @staticmethod
+    def predict(in_test, classes, mean, var):
+        """
+        Делает прогноз.
+        :param in_test: Входные данные.
+        :param classes: Классы.
+        :param mean: Среднее значение.
+        :param var: Дисперсия.
+        :return: Прогноз.
+        """
+        in_test = in_test.T
+        y_pred = []
+        proba = []
+        for x in in_test:
+            posteriors = []
+            for i, c in enumerate(classes):
+                prior = np.log(1 / len(classes))
+                class_conditional = np.sum(np.log(NaiveBayesClassifier.gaussian_pdf(x, mean[i, :], var[i, :])))
+                posterior = prior + class_conditional
+                posteriors.append(posterior)
+
+            normalized_posteriors = np.exp(posteriors) / np.sum(np.exp(posteriors))
+            proba.append(normalized_posteriors)
+            y_pred.append(classes[np.argmax(normalized_posteriors)])
+        return np.array(y_pred), np.array(proba)
+
+    @staticmethod
+    def gaussian_pdf(x, mean, var):
+        """
+        Гауссовское распределение.
+        :param x: Входные параметры.
+        :param mean: Среднее значение.
+        :param var: Дисперсия.
+        :return: Вероятность признака по гауссовскому распределению.
+        """
+        return 1 / np.sqrt(2 * np.pi * var) * np.exp(-((x - mean) ** 2) / (2 * var))
+
+    @staticmethod
+    def naive_bayes_classification(in_train, out_train, in_test):
+        """
+        Прогноз наивного байесовского классификатора для набора данных.
+        :param in_train: Входные тренировочные данные.
+        :param out_train: Выходные тренировочные данные.
+        :param in_test: Входные тестовые данные.
+        :return: Прогноз.
+        """
+        classes, mean, var = NaiveBayesClassifier.fit(in_train, out_train)
+        prediction, proba = NaiveBayesClassifier.predict(in_test, classes, mean, var)
+        return {"prediction": prediction, "proba": proba[:, 1]}
+
+
 class DataNormalization:
     """
     Нормализация данных.
@@ -179,22 +254,104 @@ class DataNormalization:
         :param not_norm_data: Ненормализованные данные.
         :return: Нормализованные данные.
         """
-        min_vals = np.min(not_norm_data)
-        max_vals = np.max(not_norm_data)
+        min_vals = np.min(not_norm_data, axis=1)[:, np.newaxis]
+        max_vals = np.max(not_norm_data, axis=1)[:, np.newaxis]
 
         return (not_norm_data - min_vals) / (max_vals - min_vals)
 
     @staticmethod
-    def standardization(not_norm_data):
+    def algebraic_function(not_norm_data, a=1):
         """
-        Нормализация методом стандартизации.
+        Нормализация алгебраической функцией.
         :param not_norm_data: Ненормализованные данные.
+        :param a: Коэффициент в нормализации.
         :return: Нормализованные данные.
         """
-        mean = np.mean(not_norm_data)
-        std = np.std(not_norm_data)
+        return not_norm_data / (np.abs(not_norm_data) + a)
 
+    @staticmethod
+    def generalization_algebraic_function(not_norm_data, a=1, n=2):
+        """
+        Нормализация обобщенной алгебраической функцией.
+        :param not_norm_data: Ненормализованные данные.
+        :param a: Коэффициент в нормализации.
+        :param n: Степень в нормализации.
+        :return: Нормализованные данные.
+        """
+        return np.power(not_norm_data, n) / (np.abs(np.power(not_norm_data), n) + a)
+
+    @staticmethod
+    def generalization_sigmoid(not_norm_data, a=1, b=1):
+        """
+        Нормализация обобщенным вариантом сигмоиды.
+        :param not_norm_data: Ненормализованные данные.
+        :param a: Коэффициент в нормализации.
+        :param b: Коэффициент в нормализации.
+        :return: Нормализованные данные.
+        """
+        return (1 + np.exp(-b * not_norm_data)) ** -a
+
+    @staticmethod
+    def arctangent_normalization(not_norm_data, a=1):
+        """
+        Нормализация арктангенсом.
+        :param not_norm_data:
+        :param a: Коэффициент нормализации.
+        :return: Нормализованные данные.
+        """
+        return np.arctan(not_norm_data / a)
+
+
+class DataStandardization:
+    """
+    Стандартизация данных.
+    """
+
+    @staticmethod
+    def pareto_method(not_norm_data):
+        """
+        Стандартизация методом Парето.
+        :param not_norm_data: Нестандартизированные данные.
+        :return: Стандартизированные данные.
+        """
+        mean = np.mean(not_norm_data, axis=1)[:, np.newaxis]
+        std = np.std(not_norm_data, axis=1)[:, np.newaxis]  # стандартное отклонение
         return (not_norm_data - mean) / std
+
+    @staticmethod
+    def z_method(not_norm_data):
+        """
+        Стандартизация методом Z-преобразования.
+        :param not_norm_data: Нестандартизированные данные.
+        :return: Стандартизированные данные.
+        """
+        mean = np.mean(not_norm_data, axis=1)[:, np.newaxis]
+        std = np.std(not_norm_data, axis=1)[:, np.newaxis]
+
+        return (not_norm_data - mean) / (std ** 2)
+
+    @staticmethod
+    def variable_stability_scaling(not_norm_data):
+        """
+        Масштабирование стабильности переменной.
+        :param not_norm_data: Нестандартизированные данные.
+        :return: Стандартизированные данные.
+        """
+        mean = np.mean(not_norm_data, axis=1)[:, np.newaxis]
+        std = np.std(not_norm_data, axis=1)[:, np.newaxis]
+
+        return mean * (not_norm_data - mean) / (std ** 2)
+
+    @staticmethod
+    def power_transformation(not_norm_data):
+        """
+        Степенное преобразование.
+        :param not_norm_data: Нестандартизированные данные.
+        :return: Стандартизированные данные.
+        """
+        mean = np.mean(not_norm_data, axis=1)[:, np.newaxis]
+        p = np.sqrt(not_norm_data - np.min(not_norm_data, axis=1)[:, np.newaxis])
+        return p - (mean ** p)
 
 
 class DataSample:
@@ -243,35 +400,49 @@ class DataSample:
         return train_data, test_data
 
     @staticmethod
-    def get_input_output_data(dataframe, input_col, normalization_func=DataNormalization.standardization,
-                              output_col=COL_INDEX_DEBT):
+    def get_input_output_data(dataframe, input_col, standartization_func=DataStandardization.pareto_method,
+                              normalization_func=DataNormalization.algebraic_function, output_col=COL_INDEX_DEBT,
+                              normalization_first=False):
         """
         Получает выходные и выходные данные.
         :param dataframe: Выборка.
-        :param normalization_func: Способ нормализации данных.
         :param input_col: Индекс столбца входных данных.
+        :param standartization_func: Способ стандартизации данных.
+        :param normalization_func: Способ нормализации данных.
         :param output_col: Индекс столбца выходных данных.
+        :param normalization_first: Проводить ли сначала нормализацию если заданы способы и стандартизации,
+        и нормализации.
         :return: Входные и выходные данные.
         """
+
         input_data = dataframe.iloc[:, input_col].values.T
-        input_data = normalization_func(input_data)
+
+        if normalization_func is not None and normalization_first is True:
+            input_data = normalization_func(input_data)
+            if standartization_func is not None:
+                input_data = standartization_func(input_data)
+        else:
+            if standartization_func is not None:
+                input_data = standartization_func(input_data)
+                if normalization_func is not None:
+                    input_data = normalization_func(input_data)
 
         output_data = dataframe[dataframe.columns[output_col]].to_numpy().reshape(-1, 1).T
 
         return input_data, output_data
 
     @staticmethod
-    def generate_new_data(file_name, train_dataframe, result_train, train_proba, test_dataframe, result_test,
+    def generate_new_data(train_dataframe, result_train, train_proba, test_dataframe, result_test,
                           test_proba):
         """
-        Генерирует csv файл.
-        :param file_name: Имя файла.
+        Генерирует новый датафрейм из разделенных на выборки.
         :param train_dataframe: Датафрейм тренировочных данных.
         :param result_train: Результаты прогнозирования на тренировочных данных.
         :param train_proba: Вероятности модели для тренировочной выборки.
         :param test_dataframe: Датафрейм тестовых данных.
         :param result_test: Результаты прогнозирования тестовых данных.
         :param test_proba: Вероятности модели для тестовой выборки.
+        :return: Объединенный датафрейм.
         """
 
         train_dataframe[NAME_PREDICT_COLUMN] = result_train[0].astype(int)
@@ -287,11 +458,33 @@ class DataSample:
 
         new_dataframe.drop_duplicates(subset=[new_dataframe.columns[COL_INDEX_NUM_CLIENT]], keep='first', inplace=True)
 
-        new_dataframe.to_csv(file_name, sep=';', encoding='windows-1251')
+        return new_dataframe
+
+    @staticmethod
+    def write_csv(dataframe, filename):
+        """
+        Записывает датафрейм в файл.
+        :param dataframe: Датафрейм.
+        :param filename: Имя файла.
+        """
+        dataframe.to_csv(filename, sep=';', encoding='windows-1251')
 
 
 class SamplingStrategy:
     """Стратегия корректировки выборки."""
+
+    @staticmethod
+    def get_classes(dataframe, col_attr=COL_INDEX_DEBT):
+        """
+        Получает миноритарный и мажоритарный класс в столбце датафрейма.
+        :param dataframe: Датафрем.
+        :param col_attr: Индекс столбца, для получения классов.
+        :return: Массив с метками и количествами, метки мажоритарного и миноритарного классов.
+        """
+        classes_counts = dataframe[dataframe.columns[col_attr]].value_counts()
+        minor_class = classes_counts.idxmin()
+        major_class = classes_counts.idxmax()
+        return classes_counts, major_class, minor_class
 
     @staticmethod
     def oversampling(dataframe, col_attr=COL_INDEX_DEBT, random_coef=0.7):
@@ -302,9 +495,7 @@ class SamplingStrategy:
         :param random_coef: Коэффициент для случайной выборки миноритарного класса.
         :return: Датафрейм со сбалансированными классами.
         """
-        classes_counts = dataframe[dataframe.columns[col_attr]].value_counts()
-        minor_class = classes_counts.idxmin()
-        major_class = classes_counts.idxmax()
+        classes_counts, major_class, minor_class = SamplingStrategy.get_classes(dataframe, col_attr)
 
         minor_rows = dataframe.loc[dataframe[dataframe.columns[col_attr]] == minor_class]
 
@@ -314,8 +505,50 @@ class SamplingStrategy:
 
         return dataframe
 
+    @staticmethod
+    def smote(dataframe, k=3, col_attr=COL_INDEX_DEBT, oversampling_coef=10, selected_columns=None):
+        """
+        Добавляет синтетические примеры миноритарного класса.
+        :param dataframe: Датафрейм.
+        :param k: Количество ближайших соседей для генерации синтетических примеров.
+        :param col_attr: Индекс столбца, по которому будет проходить корректировка.
+        :param oversampling_coef: Коэффициент количества искусственных примеров.
+        :param selected_columns: Список индексов столбцов, для которых генерируются примеры.
+        :return: Датафрейм со сбалансированными классами.
+        """
+        classes_counts, major_class, minor_class = SamplingStrategy.get_classes(dataframe, col_attr)
 
-class ModelMertics:
+        minor_dataframe = dataframe[dataframe.iloc[:, col_attr] == minor_class]
+        minor_samples = minor_dataframe.iloc[:, selected_columns].values.astype(float)
+        size_minor_sample = minor_samples.shape[0]
+
+        synthetic_samples = []
+        size_synthetic_samples = size_minor_sample * oversampling_coef
+
+        for i in range(size_synthetic_samples):
+            rand_sample = minor_samples[np.random.randint(0, size_minor_sample)]
+
+            distances = np.sqrt(np.sum((minor_samples - rand_sample) ** 2, axis=1))
+            sorted_indices = np.argsort(distances)
+            k_nearest_neighbors = sorted_indices[1:k + 1]
+
+            random_neighbor_idx = np.random.randint(0, k)
+            neighbor = minor_samples[k_nearest_neighbors[random_neighbor_idx]]
+
+            alpha = np.random.uniform(0, 1)
+            synthetic_sample = rand_sample + alpha * (neighbor - rand_sample)
+
+            synthetic_samples.append(synthetic_sample)
+
+        synthetic_df = pd.DataFrame(np.array(synthetic_samples), columns=dataframe.columns[selected_columns])
+        synthetic_df[dataframe.columns[col_attr]] = minor_class
+
+        balanced_df = pd.concat([dataframe, synthetic_df], ignore_index=True)
+
+        return balanced_df
+
+
+class ModelMetrics:
     """Метрики модели."""
 
     def __init__(self, true_output, proba, step=0.01):
@@ -373,12 +606,12 @@ class ModelMertics:
         """
         tpr, fpr, auc, t = self.get_roc()
         plt.figure()
-        plt.plot(fpr, tpr, color='blue', lw=2, label='ROC-кривая, AUC = {0:0.2f}'.format(auc))
+        plt.plot(fpr, tpr, color='blue', lw=2, label='ROC-кривая, Площадь под кривой (AUC) = {0:0.2f}'.format(auc))
         plt.plot([0, 1], [0, 1], color='red', lw=2, linestyle='--')
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.0])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
+        plt.xlabel('Доля ложно положительных прогнозов')
+        plt.ylabel('Доля истинно положительных прогнозов')
         plt.title('ROC-кривая')
         plt.legend(loc="lower right")
         plt.show()
@@ -427,7 +660,7 @@ class ModelMertics:
 
         return 2 * precision * recall / (precision + recall)
 
-    def get_all_mertrics(self, threshold=LOGISTIC_REGRESSION_THRESHOLD):
+    def get_all_metrics(self, threshold=LOGISTIC_REGRESSION_THRESHOLD):
         """
         Получает все метрики модели для заданного порогового значения модели.
         :param threshold: Пороговое значение.
@@ -444,32 +677,57 @@ class ModelMertics:
                "AUC-ROC = {0:0.2f}. Матрица ошибок \n{1}".format(auc, matrix)
 
 
-class BankData:
-    """Поиск границы отсечения."""
+class DefaultModel:
+    """
+    Модель построения и отсечения заявок для заданного уровня дефолта.
+    """
 
-    def __init__(self, tpr, fpr, thresholds_model):
+    def __init__(self, dataframe):
         """
-        Поиск границы отсечения балла.
-        :param tpr: True Positive Rate.
-        :param fpr: False Positive Rate.
-        :param thresholds_model Пороговые значения модели.
+        Модель построения и отсечения заявок для заданного уровня дефолта.
+        :param dataframe: Датафрейм.
         """
-        self.tpr = tpr
-        self.fpr = fpr
-        self.thresholds = thresholds_model
+        self.dataframe = dataframe
 
-    def get_optimal(self):
+    def count_default_orders(self, col_default_proba=NAME_MODEL_PROBABILITIES_COLUMN, default_rate=0.05):
         """
-        Вычисляет оптимальную точку ROC-кривой и пороговое значение модели.
-        :return: Точка ROC-кривой, оптимальное пороговое значение модели.
+        Подсчитывает количество дефолтных заявок для заданного уровня дефолтности.
+        :param default_rate: Уровень дефолта.
+        :param col_default_proba: Наименование столбца по которому считаются заявки.
+        :return: Количество дефолтных и не дефолтных заявок, их процентное соотношение к общему числу заявок.
         """
-        roc_curve = np.column_stack((self.fpr, self.tpr))
-        distances = np.sqrt(np.sum(np.square(roc_curve - [0, 1]), axis=1))
+        default_count = self.dataframe[self.dataframe[col_default_proba].astype(float) <= default_rate].shape[0]
+        good_count = self.dataframe[self.dataframe[col_default_proba].astype(float) > default_rate].shape[0]
 
-        optimal_point = roc_curve[np.argmin(distances)]
-        optimal_threshold = self.thresholds[np.argmin(distances)]
+        default_percent = default_count / (default_count + good_count) * 100
 
-        return optimal_point, optimal_threshold
+        return default_count, good_count, default_percent, 100 - default_percent
+
+    def form_clipping_board(self, col_index_bank_scoring=COL_INDEX_SCORE, col_index_bki_scoring=COL_INDEX_BKI_SCORE,
+                            col_default_proba=NAME_MODEL_PROBABILITIES_COLUMN, default_rate=0.05):
+        """
+        Формирует границы отсечения для банковского балла и балла БКИ при заданном уровне дефолтности.
+        :param col_index_bki_scoring: Индекс столбца баллов БКИ.
+        :param col_index_bank_scoring: Индекс столбца скорингового балла банка.
+        :param default_rate: Уровень дефолта.
+        :param col_default_proba: Наименование столбца по которому считаются заявки.
+        :return: Граница скорингового балла банка, граница скорингового балла БКИ.
+        """
+        self.dataframe[col_default_proba] = self.dataframe[col_default_proba].astype(float)
+
+        col_bank_scoring = self.dataframe.columns[col_index_bank_scoring]
+        col_bki_scoring = self.dataframe.columns[col_index_bki_scoring]
+
+        try:
+            id_board = self.dataframe[self.dataframe[col_default_proba] <= default_rate][
+                col_default_proba].idxmax()
+        except ValueError:
+            return 0, 0
+
+        bank_board = self.dataframe.loc[id_board, col_bank_scoring]
+        bki_board = self.dataframe.loc[id_board, col_bki_scoring]
+
+        return bank_board, bki_board
 
 
 if __name__ == '__main__':
@@ -478,11 +736,14 @@ if __name__ == '__main__':
     d.convert_to_analyse(int_cols=[COL_INDEX_SCORE], positive_cols=[COL_INDEX_BKI_SCORE])
     data_train, data_test = d.get_train_test_samples()
 
-    data_train = SamplingStrategy.oversampling(data_train)
+    # data_train = SamplingStrategy.oversampling(data_train)
+    data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE, COL_INDEX_BKI_SCORE])
 
-    input_train, output_train = DataSample.get_input_output_data(data_train, input_col=[COL_INDEX_SCORE])
+    input_train, output_train = DataSample.get_input_output_data(data_train,
+                                                                 input_col=[COL_INDEX_SCORE, COL_INDEX_BKI_SCORE])
 
-    input_test, output_test = DataSample.get_input_output_data(data_test, input_col=[COL_INDEX_SCORE])
+    input_test, output_test = DataSample.get_input_output_data(data_test,
+                                                               input_col=[COL_INDEX_SCORE, COL_INDEX_BKI_SCORE])
 
     print('Обучающие входные и выходные')
     print(input_train, output_train)
@@ -497,18 +758,55 @@ if __name__ == '__main__':
     print('(MyLogisticRegression) Точность на обучающей выборке ' + str(train_mlr['accuracy']) + ' %')
     print('(MyLogisticRegression) Точность на тестовой выборке ' + str(test_mlr['accuracy']) + ' %')
 
-    log_reg_metrics = ModelMertics(output_test, test_mlr['proba'])
+    log_reg_metrics = ModelMetrics(output_test, test_mlr['proba'])
     print('Метрики логистической регрессии')
-    print(log_reg_metrics.get_all_mertrics())
+    print(log_reg_metrics.get_all_metrics())
 
     log_reg_metrics.show_roc()
 
     # Создание нового файла
-    d.generate_new_data('mlr_data.csv', data_train, train_mlr['prediction'], train_mlr['proba'],
-                        data_test, test_mlr['prediction'], test_mlr['proba'])
+    # d.write_csv(d.generate_new_data(data_train, train_mlr['prediction'], train_mlr['proba'], data_test,
+    #                                test_mlr['prediction'], test_mlr['proba']), 'mlr_data.csv')
 
     # endregion
-    tpr_lr, fpr_lr, auc_lr, thresholds_lr = log_reg_metrics.get_roc()
 
-    bd = BankData(tpr_lr, fpr_lr, thresholds_lr)
-    print(bd.get_optimal())
+    # region Наивный байесовский классификатор
+    test_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_test)
+    train_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_train)
+
+    nbc_metrics = ModelMetrics(output_test, test_nbc["proba"])
+    print('Метрики наивного байесовского классификатора')
+    print(nbc_metrics.get_all_metrics())
+
+    # nbc_metrics.show_roc()
+
+    # Создание нового файла
+    # d.write_csv(d.generate_new_data(data_train, train_nbc['prediction'], train_nbc['proba'],
+    #                                data_test, test_nbc['prediction'], test_nbc['proba']), 'nbc_data.csv')
+    # endregion
+
+    # region Логистическая регрессия границы и количество заявок
+    print('ЛОГИСТИЧЕСКАЯ РЕГРЕССИЯ')
+    boards = DefaultModel(DataSample('mlr_data.csv').data)
+
+    print('Количество и доли заявок')
+    mlr_default, mlr_good, mlr_default_rate, mlr_good_rate = boards.count_default_orders(default_rate=0.1)
+    print("Дефолтные: ", mlr_default, " Кредитоспособные: ", mlr_good, "  Доля дефолтных в портфеле: ",
+          mlr_default_rate, " Доля кредитоспособных в портфеле: ", mlr_good_rate)
+
+    mlr_bank_board, mlr_bki_board = boards.form_clipping_board(default_rate=0.1)
+    print("Граница по БКИ: ", mlr_bki_board, "Граница по скоринговому баллу: ", mlr_bank_board)
+    # endregion
+
+    # region Наивный байесовский классификатор границы и количество заявок
+    print('НАИВНЫЙ БАЙЕСОВСКИЙ КЛАССИФИКАТОР')
+    boards = DefaultModel(DataSample('nbc_data.csv').data)
+
+    print('Количество и доли заявок')
+    nbc_default, nbc_good, nbc_default_rate, nbc_good_rate = boards.count_default_orders(default_rate=0.1)
+    print("Дефолтные: ", nbc_default, " Кредитоспособные: ", nbc_good, " Доля дефолтных в портфеле: ", nbc_default_rate,
+          " Доля кредитоспособных в портфеле: ", nbc_good_rate)
+
+    nbc_bank_board, nbc_bki_board = boards.form_clipping_board(default_rate=0.1)
+    print("Граница по БКИ: ", nbc_bki_board, "Граница по скоринговому баллу: ", nbc_bank_board)
+    # endregion
