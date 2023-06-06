@@ -114,19 +114,17 @@ class MyLogisticRegression:
         return w, dw, costs
 
     @staticmethod
-    def prediction(w, in_params, out_params):
+    def prediction(w, in_params):
         """
         Делает прогноз, вычисляет точность.
         :param w: Веса.
         :param in_params: Входные параметры.
-        :param out_params: Выходные параметры.
-        :return: Прогноз, точность прогноза (соотношение количества правильных прогнозов), вероятности.
+        :return: Прогноз, вероятности.
         """
         m = in_params.shape[1]
         comb = np.dot(w.T, in_params)
         new_prediction = np.zeros((1, m))
         proba = []
-        accuracy_count = 0
 
         for i in range(m):
             proba.append(MyLogisticRegression.sigmoid(comb[0][i]))
@@ -135,33 +133,26 @@ class MyLogisticRegression:
             else:
                 new_prediction[0][i] = 1
 
-            if new_prediction[0][i] == out_params[0][i]:
-                accuracy_count += 1
-
-        result_prediction = {'prediction': new_prediction, 'accuracy': (accuracy_count / in_params.shape[1]) * 100,
-                             'proba': np.array(proba)}
-
-        return result_prediction
+        return {'prediction': new_prediction, 'proba': np.array(proba)}
 
     @staticmethod
-    def logistic_regression(in_train, out_train, in_test, out_test, learning_rate=LEARNING_RATE,
+    def logistic_regression(in_train, out_train, in_test, learning_rate=LEARNING_RATE,
                             num_iterations=ITERATIONS):
         """
         Вычисления логистической регрессии для обучающей и тестовой выборок.
         :param in_train: Тренировочные входные данные.
         :param out_train: Тренировочные выходные данные.
         :param in_test: Тестовые входные данные.
-        :param out_test: Тестовые выходные данные.
         :param learning_rate: Коэффициент обучения.
         :param num_iterations: Количество итераций.
-        :return: Для каждой выборки: прогноз для выборки, точность этого прогноза, вероятности, функция ошибок модели.
+        :return: Для каждой выборки: прогноз для выборки, вероятности.
         """
         w = np.zeros([in_train.shape[0], 1])
 
         w, dw, costs = MyLogisticRegression.gradient_descent(w, in_train, out_train, num_iterations, learning_rate)
 
-        train_logistic_regression = MyLogisticRegression.prediction(w, in_train, out_train)
-        test_logistic_regression = MyLogisticRegression.prediction(w, in_test, out_test)
+        train_logistic_regression = MyLogisticRegression.prediction(w, in_train)
+        test_logistic_regression = MyLogisticRegression.prediction(w, in_test)
 
         return train_logistic_regression, test_logistic_regression
 
@@ -235,11 +226,15 @@ class NaiveBayesClassifier:
         :param in_train: Входные тренировочные данные.
         :param out_train: Выходные тренировочные данные.
         :param in_test: Входные тестовые данные.
-        :return: Прогноз.
+        :return: Для каждой выборки: прогноз для выборки, вероятности.
         """
         classes, mean, var = NaiveBayesClassifier.fit(in_train, out_train)
-        prediction, proba = NaiveBayesClassifier.predict(in_test, classes, mean, var)
-        return {"prediction": prediction, "proba": proba[:, 1]}
+
+        train_prediction, train_proba = NaiveBayesClassifier.predict(in_train, classes, mean, var)
+        test_prediction, test_proba = NaiveBayesClassifier.predict(in_test, classes, mean, var)
+
+        return {"prediction": np.reshape(train_prediction, (1, -1)), "proba": train_proba[:, 1]}, \
+               {"prediction": np.reshape(test_prediction, (1, -1)), "proba": test_proba[:, 1]}
 
 
 class DataNormalization:
@@ -401,7 +396,7 @@ class DataSample:
 
     @staticmethod
     def get_input_output_data(dataframe, input_col, standartization_func=DataStandardization.pareto_method,
-                              normalization_func=DataNormalization.algebraic_function, output_col=COL_INDEX_DEBT,
+                              normalization_func=None, output_col=COL_INDEX_DEBT,
                               normalization_first=False):
         """
         Получает выходные и выходные данные.
@@ -730,6 +725,63 @@ class DefaultModel:
         return bank_board, bki_board
 
 
+class Ensemble:
+    """Ансамбль моделей."""
+
+    def __init__(self, *models):
+        """
+        Ансамбль моделей.
+        :param args: Модели для создания ансамбля.
+        """
+        self.models = models
+
+
+class StackingEnsemble(Ensemble):
+    """Ансамбль методом модельного усреднения."""
+
+    def split_train_data(self, in_train, out_train):
+        """
+        Разбиение тренировочных данных на заданное число выборок.
+        :param in_train: Тренировочные входные данные.
+        :param out_train: Тренировочные выходные данные.
+        :return: Выборки данных.
+        """
+        samples_number = len(self.models)
+        columns = in_train.shape[1]
+
+        column_indices = np.array_split(np.arange(columns), samples_number)
+
+        in_train_split = [in_train[:, cols] for cols in column_indices]
+        out_train_split = [out_train[:, cols] for cols in column_indices]
+
+        return in_train_split, out_train_split
+
+    def use(self, in_train, out_train, in_test, voting_threshold=0.5):
+        """
+        Использовать ансамбль.
+        :param in_train: Тренировочные входные данные.
+        :param out_train: Тренировочные выходные данные.
+        :param in_test: Тестовые входные данные.
+        :param voting_threshold: Порог для голосования в бинарной классификации.
+        :return: Прогноз на основе ансамбля.
+        """
+
+        in_train_split, out_train_split = self.split_train_data(in_train, out_train)
+        test_models_predictions = []
+        test_models_proba = []
+
+        for i in range(len(self.models)):
+            prediction = self.models[i](in_train_split[i], out_train_split[i], in_test)
+            test_models_predictions.append(prediction[1]['prediction'])
+            test_models_proba.append(prediction[1]['proba'])
+
+        ensemble_test_prediction_probs = np.mean(np.array(test_models_proba), axis=0)
+        ensemble_test_prediction_classes = np.where(ensemble_test_prediction_probs >= voting_threshold, 1, 0)\
+            .reshape(1, -1)
+
+        return {'prediction': ensemble_test_prediction_classes, 'proba': ensemble_test_prediction_probs}
+
+
 if __name__ == '__main__':
     d = DataSample(NAME_CSV)
 
@@ -737,13 +789,13 @@ if __name__ == '__main__':
     data_train, data_test = d.get_train_test_samples()
 
     # data_train = SamplingStrategy.oversampling(data_train)
-    data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE, COL_INDEX_BKI_SCORE])
+    data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE])
 
     input_train, output_train = DataSample.get_input_output_data(data_train,
-                                                                 input_col=[COL_INDEX_SCORE, COL_INDEX_BKI_SCORE])
+                                                                 input_col=[COL_INDEX_SCORE])
 
     input_test, output_test = DataSample.get_input_output_data(data_test,
-                                                               input_col=[COL_INDEX_SCORE, COL_INDEX_BKI_SCORE])
+                                                               input_col=[COL_INDEX_SCORE])
 
     print('Обучающие входные и выходные')
     print(input_train, output_train)
@@ -751,18 +803,32 @@ if __name__ == '__main__':
     print('Тестовые входные и выходные')
     print(input_test, output_test)
 
+    # region Ансамбли
+
+    stack = StackingEnsemble(NaiveBayesClassifier.naive_bayes_classification,
+                             NaiveBayesClassifier.naive_bayes_classification,
+                             NaiveBayesClassifier.naive_bayes_classification,
+                             NaiveBayesClassifier.naive_bayes_classification,
+
+                             MyLogisticRegression.logistic_regression
+                             )
+
+    sens_test = stack.use(input_train, output_train, input_test)
+    sens_metrics = ModelMetrics(output_test, sens_test['proba'])
+    print('Метрики ансамбля')
+    print(sens_metrics.get_all_metrics())
+    # endregion
+
     # region Логистическая регрессия MyLogisticRegression
 
-    train_mlr, test_mlr = MyLogisticRegression.logistic_regression(input_train, output_train, input_test, output_test)
-
-    print('(MyLogisticRegression) Точность на обучающей выборке ' + str(train_mlr['accuracy']) + ' %')
-    print('(MyLogisticRegression) Точность на тестовой выборке ' + str(test_mlr['accuracy']) + ' %')
-
+    train_mlr, test_mlr = MyLogisticRegression.logistic_regression(input_train, output_train, input_test)
+    print(test_mlr['prediction'].shape)
+    print(test_mlr['proba'].shape)
     log_reg_metrics = ModelMetrics(output_test, test_mlr['proba'])
     print('Метрики логистической регрессии')
     print(log_reg_metrics.get_all_metrics())
 
-    log_reg_metrics.show_roc()
+    # log_reg_metrics.show_roc()
 
     # Создание нового файла
     # d.write_csv(d.generate_new_data(data_train, train_mlr['prediction'], train_mlr['proba'], data_test,
@@ -771,8 +837,7 @@ if __name__ == '__main__':
     # endregion
 
     # region Наивный байесовский классификатор
-    test_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_test)
-    train_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_train)
+    train_nbc, test_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_test)
 
     nbc_metrics = ModelMetrics(output_test, test_nbc["proba"])
     print('Метрики наивного байесовского классификатора')
@@ -790,11 +855,11 @@ if __name__ == '__main__':
     boards = DefaultModel(DataSample('mlr_data.csv').data)
 
     print('Количество и доли заявок')
-    mlr_default, mlr_good, mlr_default_rate, mlr_good_rate = boards.count_default_orders(default_rate=0.1)
+    mlr_default, mlr_good, mlr_default_rate, mlr_good_rate = boards.count_default_orders(default_rate=0.05)
     print("Дефолтные: ", mlr_default, " Кредитоспособные: ", mlr_good, "  Доля дефолтных в портфеле: ",
           mlr_default_rate, " Доля кредитоспособных в портфеле: ", mlr_good_rate)
 
-    mlr_bank_board, mlr_bki_board = boards.form_clipping_board(default_rate=0.1)
+    mlr_bank_board, mlr_bki_board = boards.form_clipping_board(default_rate=0.05)
     print("Граница по БКИ: ", mlr_bki_board, "Граница по скоринговому баллу: ", mlr_bank_board)
     # endregion
 
@@ -803,10 +868,10 @@ if __name__ == '__main__':
     boards = DefaultModel(DataSample('nbc_data.csv').data)
 
     print('Количество и доли заявок')
-    nbc_default, nbc_good, nbc_default_rate, nbc_good_rate = boards.count_default_orders(default_rate=0.1)
+    nbc_default, nbc_good, nbc_default_rate, nbc_good_rate = boards.count_default_orders(default_rate=0.05)
     print("Дефолтные: ", nbc_default, " Кредитоспособные: ", nbc_good, " Доля дефолтных в портфеле: ", nbc_default_rate,
           " Доля кредитоспособных в портфеле: ", nbc_good_rate)
 
-    nbc_bank_board, nbc_bki_board = boards.form_clipping_board(default_rate=0.1)
+    nbc_bank_board, nbc_bki_board = boards.form_clipping_board(default_rate=0.05)
     print("Граница по БКИ: ", nbc_bki_board, "Граница по скоринговому баллу: ", nbc_bank_board)
     # endregion

@@ -85,13 +85,14 @@ class CreationModel(QtCore.QThread):
                                                                    normalization_func=self.normalization,
                                                                    output_col=self.output_data,
                                                                    normalization_first=self.is_normalization_first)
+
         # Обучение модели
-        if self.model_type == MyLogisticRegression.logistic_regression:
-            self.train_data_model, self.test_data_model = self.model_type(input_train, output_train, input_test,
-                                                                          output_test)
-        elif self.model_type == NaiveBayesClassifier.naive_bayes_classification:
-            self.train_data_model = self.model_type(input_train, output_train, input_train)
-            self.test_data_model = self.model_type(input_train, output_train, input_test)
+        self.train_data_model, self.test_data_model = self.model_type(input_train, output_train, input_test)
+        # if self.model_type == MyLogisticRegression.logistic_regression:
+        #     self.train_data_model, self.test_data_model = self.model_type(input_train, output_train, input_test)
+        # elif self.model_type == NaiveBayesClassifier.naive_bayes_classification:
+        #     self.train_data_model = self.model_type(input_train, output_train, input_train)
+        #     self.test_data_model = self.model_type(input_train, output_train, input_test)
 
         # Метрики модели
         metrics = ModelMetrics(output_test, self.test_data_model['proba'])
