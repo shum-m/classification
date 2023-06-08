@@ -2,12 +2,10 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QStandardItemModel
 from PyQt5.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QDialog
 
-import main_design
-import create_model_design
-import model_metrics_design
-import border_model_design
-from main import DataSample, MyLogisticRegression, NaiveBayesClassifier, DataStandardization, DataNormalization, \
-    SamplingStrategy, ModelMetrics
+import main_design, create_model_design, model_metrics_design, border_model_design
+
+from main import DataSample, LogisticRegression, NaiveBayesClassifier, DecisionTree, \
+    DataStandardization, DataNormalization, SamplingStrategy, ModelMetrics, DefaultModel
 
 
 class LoadCsvThread(QtCore.QThread):
@@ -36,7 +34,7 @@ class CreationModel(QtCore.QThread):
     """
     Формирование модели.
     """
-    creation_finished = QtCore.pyqtSignal(object, object, object, object, object)
+    creation_finished = QtCore.pyqtSignal(object, object, object, object, object, object)
 
     def __init__(self, dataframe, model_type, standardization, normalization, is_normalization_first, balance_type,
                  train_data_rate, input_data, output_data):
@@ -88,16 +86,18 @@ class CreationModel(QtCore.QThread):
 
         # Обучение модели
         self.train_data_model, self.test_data_model = self.model_type(input_train, output_train, input_test)
-        # if self.model_type == MyLogisticRegression.logistic_regression:
-        #     self.train_data_model, self.test_data_model = self.model_type(input_train, output_train, input_test)
-        # elif self.model_type == NaiveBayesClassifier.naive_bayes_classification:
-        #     self.train_data_model = self.model_type(input_train, output_train, input_train)
-        #     self.test_data_model = self.model_type(input_train, output_train, input_test)
 
         # Метрики модели
         metrics = ModelMetrics(output_test, self.test_data_model['proba'])
 
-        self.creation_finished.emit(data_train, data_test, self.train_data_model, self.test_data_model, metrics)
+        # Границы отсечения
+        borders = DefaultModel(DataSample.generate_new_data(data_train, self.train_data_model['prediction'],
+                                                            self.train_data_model['proba'], data_test,
+                                                            self.test_data_model['prediction'],
+                                                            self.test_data_model['proba']))
+
+        self.creation_finished.emit(data_train, data_test, self.train_data_model, self.test_data_model, metrics,
+                                    borders)
 
 
 class SaveModelResult(QtCore.QThread):
@@ -146,10 +146,6 @@ class LoadingMessageBox(QMessageBox):
         self.setWindowTitle(title)
         self.setText(message)
         self.setStandardButtons(QMessageBox.NoButton)
-
-
-class CalculatingDefaultBorder():
-    pass
 
 
 class AnalyticApp(QMainWindow, main_design.Ui_MainWindow):
@@ -297,7 +293,15 @@ class AnalyticApp(QMainWindow, main_design.Ui_MainWindow):
             QMessageBox.critical(self, "Ошибка", "Нет модели для сохранения.")
 
     def get_boards(self):
-        pass
+        """
+        Показывает границы отсечения модели.
+        """
+        if self.data is not None and self.model is not None:
+            borders_show = BordersShow(self.model.borders)
+            borders_show.show()
+            borders_show.exec_()
+        else:
+            QMessageBox.critical(self, "Ошибка", "Модель не найдена.")
 
 
 class MetricsShow(QDialog, model_metrics_design.Ui_Dialog):
@@ -328,6 +332,44 @@ class MetricsShow(QDialog, model_metrics_design.Ui_Dialog):
         self.true_negative_data.setText(str(confusion_matrix[0][0]))
         self.false_positive_data.setText(str(confusion_matrix[0][1]))
         self.false_negative_data.setText(str(confusion_matrix[1][0]))
+
+
+class BordersShow(QDialog, border_model_design.Ui_Dialog):
+    """
+    Окно границ отсечения модели.
+    """
+    def __init__(self, borders):
+        """
+        Задание метрик.
+        :param borders: Границы отсечения.
+        """
+        (super(BordersShow, self).__init__())
+        self.setupUi(self)
+        self.borders = borders
+        self.default_rate = None
+
+        self.calculate_button.clicked.connect(self.get_borders)
+
+    def get_borders(self):
+        """
+        Вычисляет границы отсечения для заданного уровня дефолтности.
+        """
+
+        default_count, good_count, default_percent, good_percent = self.borders.count_default_orders(
+            default_rate=self.default_data.value() / 100)
+
+        bank_board, bki_board = self.borders.form_clipping_board(col_index_bank_scoring=self.sckoring_data.value(),
+                                                                 col_index_bki_scoring=self.bki_data.value(),
+                                                                 default_rate=self.default_data.value() / 100)
+        # посмотреть, почему не работает
+        print(bank_board, bki_board)
+        self.default_part_data.setText(str(round(default_percent, 3)) + '%')
+        self.good_part_data.setText(str(round(good_percent, 3)) + '%')
+        self.default_count_data.setText(str(default_count))
+        self.good_count_data.setText(str(good_count))
+
+        self.border_scoring_data.setText(str(bank_board))
+        self.border_bki_data.setText(str(bki_board))
 
 
 class ModelCreation(QDialog, create_model_design.Ui_dialog):
@@ -371,6 +413,9 @@ class ModelCreation(QDialog, create_model_design.Ui_dialog):
 
         self.data_test = None
         """Датафрейм тестовых данных."""
+
+        self.borders = None
+        """Границы отсечения модели."""
 
     def select_params(self):
         """
@@ -420,21 +465,23 @@ class ModelCreation(QDialog, create_model_design.Ui_dialog):
             QMessageBox.information(self, "Создание модели", "Модель успешно создана.")
             self.close()
 
-    @QtCore.pyqtSlot(object, object, object, object, object)
-    def set_model_output(self, data_train, data_test, train_data_model, test_data_model, metrics):
+    @QtCore.pyqtSlot(object, object, object, object, object, object)
+    def set_model_output(self, data_train, data_test, train_data_model, test_data_model, metrics, borders):
         """
-        Получение результатов модели
+        Получение результатов модели.
         :param data_train: Тренировочный датафрейм.
         :param data_test: Тестовый датафрейм.
         :param train_data_model: Результаты на тренировочных данных.
         :param test_data_model: Результаты на тестовых данных.
         :param metrics: Метрики модели.
+        :param borders: Границы отсечения модели.
         """
         self.train_data_model = train_data_model
         self.test_data_model = test_data_model
         self.data_train = data_train
         self.data_test = data_test
         self.model_metrics = metrics
+        self.borders = borders
 
     @staticmethod
     def get_model_type(index):
@@ -444,9 +491,11 @@ class ModelCreation(QDialog, create_model_design.Ui_dialog):
         :return: Модель.
         """
         if index == 0:
-            return MyLogisticRegression.logistic_regression
+            return LogisticRegression.logistic_regression
         elif index == 1:
             return NaiveBayesClassifier.naive_bayes_classification
+        elif index == 2:
+            return DecisionTree.decision_tree
 
     @staticmethod
     def get_standardization(index):

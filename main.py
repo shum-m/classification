@@ -39,7 +39,7 @@ NAME_MODEL_PROBABILITIES_COLUMN = 'Вероятности модели'
 """Имя столбца для вероятностей модели"""
 
 
-class MyLogisticRegression:
+class LogisticRegression:
     """Логистическая регрессия."""
 
     @staticmethod
@@ -70,7 +70,7 @@ class MyLogisticRegression:
         :param in_params: Входные данные.
         :return: Новые веса.
         """
-        weights = MyLogisticRegression.sigmoid(np.dot(w.T, in_params))
+        weights = LogisticRegression.sigmoid(np.dot(w.T, in_params))
         return weights
 
     @staticmethod
@@ -103,10 +103,10 @@ class MyLogisticRegression:
         dw = None
 
         for i in range(num_iterations):
-            comb = MyLogisticRegression.calc_weights(w, in_params)
-            cost = MyLogisticRegression.calc_cost(m, out_params, comb)
+            comb = LogisticRegression.calc_weights(w, in_params)
+            cost = LogisticRegression.calc_cost(m, out_params, comb)
 
-            dw = MyLogisticRegression.update_weights(m, comb, in_params, out_params)
+            dw = LogisticRegression.update_weights(m, comb, in_params, out_params)
             w = w - learning_rate * dw
 
             costs.append(cost)
@@ -127,7 +127,7 @@ class MyLogisticRegression:
         proba = []
 
         for i in range(m):
-            proba.append(MyLogisticRegression.sigmoid(comb[0][i]))
+            proba.append(LogisticRegression.sigmoid(comb[0][i]))
             if proba[i] <= LOGISTIC_REGRESSION_THRESHOLD:
                 new_prediction[0][i] = 0
             else:
@@ -149,10 +149,10 @@ class MyLogisticRegression:
         """
         w = np.zeros([in_train.shape[0], 1])
 
-        w, dw, costs = MyLogisticRegression.gradient_descent(w, in_train, out_train, num_iterations, learning_rate)
+        w, dw, costs = LogisticRegression.gradient_descent(w, in_train, out_train, num_iterations, learning_rate)
 
-        train_logistic_regression = MyLogisticRegression.prediction(w, in_train)
-        test_logistic_regression = MyLogisticRegression.prediction(w, in_test)
+        train_logistic_regression = LogisticRegression.prediction(w, in_train)
+        test_logistic_regression = LogisticRegression.prediction(w, in_test)
 
         return train_logistic_regression, test_logistic_regression
 
@@ -725,6 +725,33 @@ class DefaultModel:
         return bank_board, bki_board
 
 
+class BootstrapSampler:
+    """Бутстрэп выборка."""
+
+    def __init__(self, in_data, out_data):
+        """
+        Бутстрэп выборка.
+        :param in_data: Входные данные.
+        :param out_data: Выходные данные.
+        """
+        self.input_data = in_data
+        self.output_data = out_data
+
+    def generate_sample(self, samples_number):
+        """
+        Генерирует бутстрэп выборку.
+        :param samples_number: Количество выборок.
+        :return: Бутстрэп выборки для входных и выходных данных.
+        """
+        columns = self.input_data.shape[1]
+
+        column_indices = np.random.choice(columns, size=(samples_number, columns), replace=True)
+        in_train_split = [self.input_data[:, cols] for cols in column_indices]
+        out_train_split = [self.output_data[:, cols] for cols in column_indices]
+
+        return in_train_split, out_train_split
+
+
 class Ensemble:
     """Ансамбль моделей."""
 
@@ -736,25 +763,8 @@ class Ensemble:
         self.models = models
 
 
-class StackingEnsemble(Ensemble):
+class EnsembleModelAverage(Ensemble):
     """Ансамбль методом модельного усреднения."""
-
-    def split_train_data(self, in_train, out_train):
-        """
-        Разбиение тренировочных данных на заданное число выборок.
-        :param in_train: Тренировочные входные данные.
-        :param out_train: Тренировочные выходные данные.
-        :return: Выборки данных.
-        """
-        samples_number = len(self.models)
-        columns = in_train.shape[1]
-
-        column_indices = np.array_split(np.arange(columns), samples_number)
-
-        in_train_split = [in_train[:, cols] for cols in column_indices]
-        out_train_split = [out_train[:, cols] for cols in column_indices]
-
-        return in_train_split, out_train_split
 
     def use(self, in_train, out_train, in_test, voting_threshold=0.5):
         """
@@ -765,8 +775,8 @@ class StackingEnsemble(Ensemble):
         :param voting_threshold: Порог для голосования в бинарной классификации.
         :return: Прогноз на основе ансамбля.
         """
+        in_train_split, out_train_split = BootstrapSampler(in_train, out_train).generate_sample(len(self.models))
 
-        in_train_split, out_train_split = self.split_train_data(in_train, out_train)
         test_models_predictions = []
         test_models_proba = []
 
@@ -776,10 +786,193 @@ class StackingEnsemble(Ensemble):
             test_models_proba.append(prediction[1]['proba'])
 
         ensemble_test_prediction_probs = np.mean(np.array(test_models_proba), axis=0)
-        ensemble_test_prediction_classes = np.where(ensemble_test_prediction_probs >= voting_threshold, 1, 0)\
+        ensemble_test_prediction_classes = np.where(ensemble_test_prediction_probs >= voting_threshold, 1, 0) \
             .reshape(1, -1)
 
         return {'prediction': ensemble_test_prediction_classes, 'proba': ensemble_test_prediction_probs}
+
+
+class StackingEnsemble:
+    """Ансамбль методом модельного наложения."""
+
+    def __init__(self, meta_model, *models):
+        """
+        Ансамбль методом модельного наложения.
+        :param meta_model: Мета-модель.
+        :param models: Базовые модели.
+        """
+        self.models = models
+        self.meta_model = meta_model
+
+    def use(self, in_train, out_train, in_test):
+        train_predictions = np.zeros((len(self.models), in_train.shape[1]))
+        test_predictions = np.zeros((len(self.models), in_test.shape[1]))
+
+        # Обучение базовых моделей и формирование стекинговых данных для тренировочного набора
+        for i in range(len(self.models)):
+            train_predictions[i, :] = self.models[i](in_train, out_train, in_train)[1]['prediction']
+
+        # Обучение базовых моделей и формирование стекинговых данных для тестового набора
+        for i in range(len(self.models)):
+            test_predictions[i, :] = self.models[i](in_train, out_train, in_test)[1]['prediction']
+
+        print('ПОСЧИТАНО тренировочные: ', train_predictions.shape)
+        print('ПОСЧИТАНО тестовые: ', test_predictions.shape)
+
+        return self.meta_model(train_predictions, out_train, test_predictions)[1]
+
+
+class DecisionTree:
+    """Решающее дерево."""
+
+    def __init__(self):
+        self.tree = None
+
+    @staticmethod
+    def gini_index(groups):
+        """
+        Вычисляет индекс Джини.
+        :param groups: Группы разделения.
+        :return: Индекс Джини
+        """
+        gini = 0.0
+        for group in groups:
+            size = float(len(group))
+            if size == 0:
+                continue
+            p = np.count_nonzero(group) / size
+            gini += (p * (1 - p))
+        return gini
+
+    @staticmethod
+    def split(index, value, dataset):
+        """
+        Разделяет данные на две группы.
+        :param index: Индекс элемента.
+        :param value: Порог разделения
+        :param dataset: Набор данных.
+        :return: Группы.
+        """
+        left = dataset[:, dataset[index] < value]
+        right = dataset[:, dataset[index] >= value]
+        return left, right
+
+    @staticmethod
+    def get_best_split(dataset):
+        """
+        Поиск наилучшего разделения.
+        :param dataset: Набор данных для разделения
+        :return: Индекс признака для лучшего разделения, значение для разделения, пара групп для разделения.
+        """
+        b_index, b_value, b_score, b_groups = np.inf, np.inf, np.inf, None
+        for index in range(len(dataset) - 1):
+            for value in np.unique(dataset[index]):
+                groups = DecisionTree.split(index, value, dataset)
+                gini = DecisionTree.gini_index(groups)
+                if gini < b_score:
+                    b_index, b_value, b_score, b_groups = index, value, gini, groups
+        return {'index': b_index, 'value': b_value, 'groups': b_groups}
+
+    @staticmethod
+    def to_terminal(group):
+        """
+        Делает прогноз для листового узла.
+        :param group: Группы разделения.
+        :return: Прогноз для листового узла.
+        """
+        outcomes, counts = np.unique(group, return_counts=True)
+        return outcomes[np.argmax(counts)]
+
+    @staticmethod
+    def split_recursive(node, max_depth, min_size, depth):
+        """
+        Разделяет дерево.
+        :param node: Текущий узел дерева.
+        :param max_depth: Максимальная глубина.
+        :param min_size: Минимальное количество объектов для листа.
+        :param depth: Глубина.
+        :return: Разделенное дерево.
+        """
+
+        left, right = node['groups']
+        del node['groups']
+        if not left.any() or not right.any():
+            node['left'] = node['right'] = DecisionTree.to_terminal(np.concatenate((left, right), axis=1))
+            return
+        if depth >= max_depth:
+            node['left'], node['right'] = DecisionTree.to_terminal(left[-1]), DecisionTree.to_terminal(right[-1])
+            return
+        if left.shape[1] <= min_size:
+            node['left'] = DecisionTree.to_terminal(left[-1])
+        else:
+            node['left'] = DecisionTree.get_best_split(left)
+            DecisionTree.split_recursive(node['left'], max_depth, min_size, depth + 1)
+        if right.shape[1] <= min_size:
+            node['right'] = DecisionTree.to_terminal(right[-1])
+        else:
+            node['right'] = DecisionTree.get_best_split(right)
+            DecisionTree.split_recursive(node['right'], max_depth, min_size, depth + 1)
+
+    def fit(self, in_train, out_train, max_depth=5, min_size=5):
+        """
+        Обучение модели.
+        :param in_train: Входные тренировочные данные.
+        :param out_train: Выходные тренировочные данные.
+        :param max_depth: Глубина дерева.
+        :param min_size: Минимальное количество для листа.
+        """
+        dataset = np.concatenate((in_train, out_train), axis=0)
+        self.tree = DecisionTree.get_best_split(dataset)
+        DecisionTree.split_recursive(self.tree, max_depth, min_size, 1)
+
+    @staticmethod
+    def predict_recursive(node, row):
+        """
+        Рекурсивное прогнозирование.
+        :param node: Текущий узел дерева.
+        :param row: Данные для прогноза.
+        :return: Прогноз.
+        """
+        if row[node['index']] < node['value']:
+            if isinstance(node['left'], dict):
+                return DecisionTree.predict_recursive(node['left'], row)
+            else:
+                return node['left']
+        else:
+            if isinstance(node['right'], dict):
+                return DecisionTree.predict_recursive(node['right'], row)
+            else:
+                return node['right']
+
+    def predict(self, in_test):
+        """
+        Прогноз для тестовых данных.
+        :param in_test: Тестовые входные данные.
+        :return: Прогноз для тестовых данных.
+        """
+        predictions = []
+        for i in range(in_test.shape[1]):
+            row = in_test[:, i]
+            prediction = DecisionTree.predict_recursive(self.tree, row)
+            predictions.append(prediction)
+        return np.array(predictions).reshape(1, -1)
+
+    @staticmethod
+    def decision_tree(in_train, out_train, in_test):
+        """
+        Прогнозы для выборок.
+        :param in_train: Входные тренировочные данные.
+        :param out_train: Выходные тренировочные данные.
+        :param in_test: Входные тестовые данные.
+        :return: Прогноз для каждой выборки, вероятности для каждой выборки.
+        """
+        dt = DecisionTree()
+        dt.fit(in_train, out_train)
+        train_prediction = dt.predict(in_train)
+        test_prediction = dt.predict(in_test)
+
+        return {'prediction': train_prediction, 'proba': train_prediction.reshape(-1)}, \
+               {'prediction': test_prediction, 'proba': test_prediction.reshape(-1)}
 
 
 if __name__ == '__main__':
@@ -788,8 +981,8 @@ if __name__ == '__main__':
     d.convert_to_analyse(int_cols=[COL_INDEX_SCORE], positive_cols=[COL_INDEX_BKI_SCORE])
     data_train, data_test = d.get_train_test_samples()
 
-    # data_train = SamplingStrategy.oversampling(data_train)
-    data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE])
+    data_train = SamplingStrategy.oversampling(data_train)
+    # data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE])
 
     input_train, output_train = DataSample.get_input_output_data(data_train,
                                                                  input_col=[COL_INDEX_SCORE])
@@ -803,27 +996,75 @@ if __name__ == '__main__':
     print('Тестовые входные и выходные')
     print(input_test, output_test)
 
-    # region Ансамбли
+    # region Метод решающих деревьев.
 
-    stack = StackingEnsemble(NaiveBayesClassifier.naive_bayes_classification,
-                             NaiveBayesClassifier.naive_bayes_classification,
-                             NaiveBayesClassifier.naive_bayes_classification,
-                             NaiveBayesClassifier.naive_bayes_classification,
+    dt_train, dt_test = DecisionTree.decision_tree(input_train, output_train, input_test)
 
-                             MyLogisticRegression.logistic_regression
-                             )
+    dt_metrics = ModelMetrics(output_test, dt_test['proba'])
+    print(dt_test['proba'].shape)
+    print(dt_test['prediction'].shape)
+    print('Метрики решающего дерева')
+    print(dt_metrics.get_all_metrics())
 
-    sens_test = stack.use(input_train, output_train, input_test)
-    sens_metrics = ModelMetrics(output_test, sens_test['proba'])
-    print('Метрики ансамбля')
-    print(sens_metrics.get_all_metrics())
+    # Создание нового файла
+    d.write_csv(d.generate_new_data(data_train, dt_train['prediction'], dt_train['proba'], data_test,
+                                    dt_test['prediction'], dt_test['proba']), 'dt_data.csv')
+
     # endregion
 
-    # region Логистическая регрессия MyLogisticRegression
+    # region МЕТОД МОДЕЛЬНОГО НАЛОЖЕНИЯ
+    se = StackingEnsemble(NaiveBayesClassifier.naive_bayes_classification,
+                          LogisticRegression.logistic_regression,
+                          NaiveBayesClassifier.naive_bayes_classification,
+                          DecisionTree.decision_tree)
 
-    train_mlr, test_mlr = MyLogisticRegression.logistic_regression(input_train, output_train, input_test)
+    se_test = se.use(input_train, output_train, input_test)
+
+    se_metrics = ModelMetrics(output_test, se_test['proba'])
+    print('Метрики ансамбля методом модельного наложения (тест)')
+    print(se_metrics.get_all_metrics())
+    # endregion
+
+    # region Ансамбли МЕТОД МОДЕЛЬНОГО УСРЕДНЕНИЯ
+
+    # ema = EnsembleModelAverage(
+    #     NaiveBayesClassifier.naive_bayes_classification,
+    #     NaiveBayesClassifier.naive_bayes_classification,
+    #     NaiveBayesClassifier.naive_bayes_classification,
+    #     NaiveBayesClassifier.naive_bayes_classification,
+    #     LogisticRegression.logistic_regression,
+    #     LogisticRegression.logistic_regression,
+    #     LogisticRegression.logistic_regression
+    # )
+    #
+    # sens_test = ema.use(input_train, output_train, input_test)
+    # sens_metrics = ModelMetrics(output_test, sens_test['proba'])
+    # print('Метрики ансамбля методом модельного усреднения (тест)')
+    # print(sens_metrics.get_all_metrics())
+
+    # endregion
+
+    # region Ансамбли МЕТОД МОДЕЛЬНОГО УСРЕДНЕНИЯ
+
+    ema = EnsembleModelAverage(
+        DecisionTree.decision_tree,
+        DecisionTree.decision_tree,
+        DecisionTree.decision_tree,
+        NaiveBayesClassifier.naive_bayes_classification,
+        LogisticRegression.logistic_regression
+    )
+
+    sens_test = ema.use(input_train, output_train, input_test)
+    sens_metrics = ModelMetrics(output_test, sens_test['proba'])
+    print('Метрики ансамбля методом модельного усреднения (тест)')
+    print(sens_metrics.get_all_metrics())
+
+    # endregion
+
+    # region Логистическая регрессия LogisticRegression
+
+    train_mlr, test_mlr = LogisticRegression.logistic_regression(input_train, output_train, input_test)
     print(test_mlr['prediction'].shape)
-    print(test_mlr['proba'].shape)
     log_reg_metrics = ModelMetrics(output_test, test_mlr['proba'])
     print('Метрики логистической регрессии')
     print(log_reg_metrics.get_all_metrics())
