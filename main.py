@@ -709,6 +709,7 @@ class DefaultModel:
         :return: Граница скорингового балла банка, граница скорингового балла БКИ.
         """
         self.dataframe[col_default_proba] = self.dataframe[col_default_proba].astype(float)
+        self.dataframe = self.dataframe.sort_values(self.dataframe.columns[COL_INDEX_SCORE])
 
         col_bank_scoring = self.dataframe.columns[col_index_bank_scoring]
         col_bki_scoring = self.dataframe.columns[col_index_bki_scoring]
@@ -788,7 +789,6 @@ class EnsembleModelAverage(Ensemble):
         ensemble_test_prediction_probs = np.mean(np.array(test_models_proba), axis=0)
         ensemble_test_prediction_classes = np.where(ensemble_test_prediction_probs >= voting_threshold, 1, 0) \
             .reshape(1, -1)
-
         return {'prediction': ensemble_test_prediction_classes, 'proba': ensemble_test_prediction_probs}
 
 
@@ -816,10 +816,8 @@ class StackingEnsemble:
         for i in range(len(self.models)):
             test_predictions[i, :] = self.models[i](in_train, out_train, in_test)[1]['prediction']
 
-        print('ПОСЧИТАНО тренировочные: ', train_predictions.shape)
-        print('ПОСЧИТАНО тестовые: ', test_predictions.shape)
-
-        return self.meta_model(train_predictions, out_train, test_predictions)[1]
+        result = self.meta_model(train_predictions, out_train, test_predictions)
+        return {'prediction': result[1]['prediction'], 'proba': result[1]['proba']}
 
 
 class DecisionTree:
@@ -976,98 +974,111 @@ class DecisionTree:
 
 
 if __name__ == '__main__':
-    d = DataSample(NAME_CSV)
-
-    d.convert_to_analyse(int_cols=[COL_INDEX_SCORE], positive_cols=[COL_INDEX_BKI_SCORE])
-    data_train, data_test = d.get_train_test_samples()
-
-    data_train = SamplingStrategy.oversampling(data_train)
-    # data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE])
-
-    input_train, output_train = DataSample.get_input_output_data(data_train,
-                                                                 input_col=[COL_INDEX_SCORE])
-
-    input_test, output_test = DataSample.get_input_output_data(data_test,
-                                                               input_col=[COL_INDEX_SCORE])
-
-    print('Обучающие входные и выходные')
-    print(input_train, output_train)
-
-    print('Тестовые входные и выходные')
-    print(input_test, output_test)
+    pass
+    # d = DataSample(NAME_CSV)
+    #
+    # d.convert_to_analyse(int_cols=[COL_INDEX_SCORE], positive_cols=[COL_INDEX_BKI_SCORE])
+    # data_train, data_test = d.get_train_test_samples()
+    #
+    # data_train = SamplingStrategy.oversampling(data_train)
+    # #data_train = SamplingStrategy.smote(data_train, selected_columns=[COL_INDEX_SCORE])
+    #
+    # input_train, output_train = DataSample.get_input_output_data(data_train,
+    #                                                              input_col=[COL_INDEX_SCORE],
+    #                                                              standartization_func=DataStandardization.variable_stability_scaling,
+    #                                                              normalization_func=None)
+    #
+    # input_test, output_test = DataSample.get_input_output_data(data_test,
+    #                                                            input_col=[COL_INDEX_SCORE],
+    #                                                            standartization_func=DataStandardization.variable_stability_scaling,
+    #                                                            normalization_func=None)
+    #
+    # print('Обучающие входные и выходные')
+    # print(input_train, output_train)
+    #
+    # print('Тестовые входные и выходные')
+    # print(input_test, output_test)
 
     # region Метод решающих деревьев.
 
-    dt_train, dt_test = DecisionTree.decision_tree(input_train, output_train, input_test)
-
-    dt_metrics = ModelMetrics(output_test, dt_test['proba'])
-    print(dt_test['proba'].shape)
-    print(dt_test['prediction'].shape)
-    print('Метрики решающего дерева')
-    print(dt_metrics.get_all_metrics())
-
-    # Создание нового файла
-    d.write_csv(d.generate_new_data(data_train, dt_train['prediction'], dt_train['proba'], data_test,
-                                    dt_test['prediction'], dt_test['proba']), 'dt_data.csv')
+    # dt_train, dt_test = DecisionTree.decision_tree(input_train, output_train, input_test)
+    #
+    # dt_metrics = ModelMetrics(output_test, dt_test['proba'])
+    #
+    # print('Метрики решающего дерева')
+    # print(dt_metrics.get_all_metrics())
+    #
+    # # Создание нового файла
+    # d.write_csv(d.generate_new_data(data_train, dt_train['prediction'], dt_train['proba'], data_test,
+    #                                 dt_test['prediction'], dt_test['proba']), 'dt_data.csv')
 
     # endregion
 
     # region МЕТОД МОДЕЛЬНОГО НАЛОЖЕНИЯ
-    se = StackingEnsemble(NaiveBayesClassifier.naive_bayes_classification,
-                          LogisticRegression.logistic_regression,
-                          NaiveBayesClassifier.naive_bayes_classification,
-                          DecisionTree.decision_tree)
-
-    se_test = se.use(input_train, output_train, input_test)
-
-    se_metrics = ModelMetrics(output_test, se_test['proba'])
-    print('Метрики ансамбля методом модельного наложения (тест)')
-    print(se_metrics.get_all_metrics())
+    # se = StackingEnsemble(LogisticRegression.logistic_regression,
+    #                       LogisticRegression.logistic_regression,
+    #                       NaiveBayesClassifier.naive_bayes_classification,
+    #                       NaiveBayesClassifier.naive_bayes_classification
+    #                       )
+    #
+    # se_train = se.use(input_train, output_train, input_train)
+    # se_test = se.use(input_train, output_train, input_test)
+    #
+    # se_metrics = ModelMetrics(output_test, se_test['proba'])
+    # print('Метрики ансамбля методом модельного наложения (тест)')
+    # print(se_test['proba'])
+    # print(se_test['prediction'])
+    #
+    # print(se_metrics.get_all_metrics())
+    #
+    # print('МЕТОД МОДЕЛЬНОГО НАЛОЖЕНИЯ')
+    # d.write_csv(d.generate_new_data(data_train, se_train['prediction'], se_train['proba'], data_test,
+    #                                 se_test['prediction'], se_test['proba']), 'se_data.csv')
+    # boards = DefaultModel(DataSample('se_data.csv').data)
+    #
+    # print('Количество и доли заявок')
+    # se_default, se_good, se_default_rate, se_good_rate = boards.count_default_orders(default_rate=0.05)
+    # print("Дефолтные: ", se_default, " Кредитоспособные: ", se_good, " Доля дефолтных в портфеле: ",
+    #       se_default_rate,
+    #       " Доля кредитоспособных в портфеле: ", se_good_rate)
+    #
+    # se_bank_board, se_bki_board = boards.form_clipping_board(default_rate=0.05)
+    # print("Граница по БКИ: ", se_bki_board, "Граница по скоринговому баллу: ", se_bank_board)
     # endregion
 
     # region Ансамбли МЕТОД МОДЕЛЬНОГО УСРЕДНЕНИЯ
 
     # ema = EnsembleModelAverage(
     #     NaiveBayesClassifier.naive_bayes_classification,
-    #     NaiveBayesClassifier.naive_bayes_classification,
-    #     NaiveBayesClassifier.naive_bayes_classification,
-    #     NaiveBayesClassifier.naive_bayes_classification,
-    #     LogisticRegression.logistic_regression,
-    #     LogisticRegression.logistic_regression,
     #     LogisticRegression.logistic_regression
     # )
-    #
+    # sens_train = ema.use(input_train, output_train, input_train)
     # sens_test = ema.use(input_train, output_train, input_test)
     # sens_metrics = ModelMetrics(output_test, sens_test['proba'])
     # print('Метрики ансамбля методом модельного усреднения (тест)')
     # print(sens_metrics.get_all_metrics())
-
-    # endregion
-
-    # region Ансамбли МЕТОД МОДЕЛЬНОГО УСРЕДНЕНИЯ
-
-    ema = EnsembleModelAverage(
-        DecisionTree.decision_tree,
-        DecisionTree.decision_tree,
-        DecisionTree.decision_tree,
-        NaiveBayesClassifier.naive_bayes_classification,
-        LogisticRegression.logistic_regression
-    )
-
-    sens_test = ema.use(input_train, output_train, input_test)
-    sens_metrics = ModelMetrics(output_test, sens_test['proba'])
-    print('Метрики ансамбля методом модельного усреднения (тест)')
-    print(sens_metrics.get_all_metrics())
-
+    #
+    # print('МЕТОД МОДЕЛЬНОГО УСРЕДНЕНИЯ')
+    # d.write_csv(d.generate_new_data(data_train, sens_train['prediction'], sens_train['proba'], data_test,
+    #                                 sens_test['prediction'], sens_test['proba']), 'sens_data.csv')
+    # boards = DefaultModel(DataSample('sens_data.csv').data)
+    #
+    # print('Количество и доли заявок')
+    # sens_default, sens_good, sens_default_rate, sens_good_rate = boards.count_default_orders(default_rate=0.05)
+    # print("Дефолтные: ", sens_default, " Кредитоспособные: ", sens_good, " Доля дефолтных в портфеле: ", sens_default_rate,
+    #       " Доля кредитоспособных в портфеле: ", sens_good_rate)
+    #
+    # sens_bank_board, sens_bki_board = boards.form_clipping_board(default_rate=0.05)
+    # print("Граница по БКИ: ", sens_bki_board, "Граница по скоринговому баллу: ", sens_bank_board)
     # endregion
 
     # region Логистическая регрессия LogisticRegression
 
-    train_mlr, test_mlr = LogisticRegression.logistic_regression(input_train, output_train, input_test)
-    print(test_mlr['prediction'].shape)
-    log_reg_metrics = ModelMetrics(output_test, test_mlr['proba'])
-    print('Метрики логистической регрессии')
-    print(log_reg_metrics.get_all_metrics())
+    # train_mlr, test_mlr = LogisticRegression.logistic_regression(input_train, output_train, input_test)
+    #
+    # log_reg_metrics = ModelMetrics(output_test, test_mlr['proba'])
+    # print('Метрики логистической регрессии')
+    # print(log_reg_metrics.get_all_metrics())
 
     # log_reg_metrics.show_roc()
 
@@ -1078,41 +1089,41 @@ if __name__ == '__main__':
     # endregion
 
     # region Наивный байесовский классификатор
-    train_nbc, test_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_test)
-
-    nbc_metrics = ModelMetrics(output_test, test_nbc["proba"])
-    print('Метрики наивного байесовского классификатора')
-    print(nbc_metrics.get_all_metrics())
+    # train_nbc, test_nbc = NaiveBayesClassifier.naive_bayes_classification(input_train, output_train, input_test)
+    #
+    # nbc_metrics = ModelMetrics(output_test, test_nbc["proba"])
+    # print('Метрики наивного байесовского классификатора')
+    # print(nbc_metrics.get_all_metrics())
 
     # nbc_metrics.show_roc()
 
     # Создание нового файла
-    # d.write_csv(d.generate_new_data(data_train, train_nbc['prediction'], train_nbc['proba'],
-    #                                data_test, test_nbc['prediction'], test_nbc['proba']), 'nbc_data.csv')
+    # d.write_csv(d.generate_new_data(data_train, train_nbc['prediction'], train_nbc['proba'], data_test,
+    #                                 test_nbc['prediction'], test_nbc['proba']), 'nbc_data.csv')
     # endregion
 
     # region Логистическая регрессия границы и количество заявок
-    print('ЛОГИСТИЧЕСКАЯ РЕГРЕССИЯ')
-    boards = DefaultModel(DataSample('mlr_data.csv').data)
-
-    print('Количество и доли заявок')
-    mlr_default, mlr_good, mlr_default_rate, mlr_good_rate = boards.count_default_orders(default_rate=0.05)
-    print("Дефолтные: ", mlr_default, " Кредитоспособные: ", mlr_good, "  Доля дефолтных в портфеле: ",
-          mlr_default_rate, " Доля кредитоспособных в портфеле: ", mlr_good_rate)
-
-    mlr_bank_board, mlr_bki_board = boards.form_clipping_board(default_rate=0.05)
-    print("Граница по БКИ: ", mlr_bki_board, "Граница по скоринговому баллу: ", mlr_bank_board)
+    # print('ЛОГИСТИЧЕСКАЯ РЕГРЕССИЯ')
+    # boards = DefaultModel(DataSample('mlr_data.csv').data)
+    #
+    # print('Количество и доли заявок')
+    # mlr_default, mlr_good, mlr_default_rate, mlr_good_rate = boards.count_default_orders(default_rate=0.05)
+    # print("Дефолтные: ", mlr_default, " Кредитоспособные: ", mlr_good, "  Доля дефолтных в портфеле: ",
+    #       mlr_default_rate, " Доля кредитоспособных в портфеле: ", mlr_good_rate)
+    #
+    # mlr_bank_board, mlr_bki_board = boards.form_clipping_board(default_rate=0.05)
+    # print("Граница по БКИ: ", mlr_bki_board, "Граница по скоринговому баллу: ", mlr_bank_board)
     # endregion
 
     # region Наивный байесовский классификатор границы и количество заявок
-    print('НАИВНЫЙ БАЙЕСОВСКИЙ КЛАССИФИКАТОР')
-    boards = DefaultModel(DataSample('nbc_data.csv').data)
-
-    print('Количество и доли заявок')
-    nbc_default, nbc_good, nbc_default_rate, nbc_good_rate = boards.count_default_orders(default_rate=0.05)
-    print("Дефолтные: ", nbc_default, " Кредитоспособные: ", nbc_good, " Доля дефолтных в портфеле: ", nbc_default_rate,
-          " Доля кредитоспособных в портфеле: ", nbc_good_rate)
-
-    nbc_bank_board, nbc_bki_board = boards.form_clipping_board(default_rate=0.05)
-    print("Граница по БКИ: ", nbc_bki_board, "Граница по скоринговому баллу: ", nbc_bank_board)
+    # print('НАИВНЫЙ БАЙЕСОВСКИЙ КЛАССИФИКАТОР')
+    # boards = DefaultModel(DataSample('nbc_data.csv').data)
+    #
+    # print('Количество и доли заявок')
+    # nbc_default, nbc_good, nbc_default_rate, nbc_good_rate = boards.count_default_orders(default_rate=0.05)
+    # print("Дефолтные: ", nbc_default, " Кредитоспособные: ", nbc_good, " Доля дефолтных в портфеле: ", nbc_default_rate,
+    #       " Доля кредитоспособных в портфеле: ", nbc_good_rate)
+    #
+    # nbc_bank_board, nbc_bki_board = boards.form_clipping_board(default_rate=0.05)
+    # print("Граница по БКИ: ", nbc_bki_board, "Граница по скоринговому баллу: ", nbc_bank_board)
     # endregion
